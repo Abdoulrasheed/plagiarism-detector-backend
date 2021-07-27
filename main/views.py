@@ -1,41 +1,68 @@
 import random
+import requests
 from django.views import View
 from django.conf import settings
 from django.shortcuts import render
 from django.http import JsonResponse
-from copyleaks.copyleaks import Copyleaks, Products
-from copyleaks.models.submit.document import UrlDocument
-from copyleaks.exceptions.command_error import CommandError
-from copyleaks.models.submit.properties.scan_properties import ScanProperties
-
-class LoginView(View):
-    def get(self, request):
-        try:
-            response = Copyleaks.login(settings.COPYLEAKS_EMAIL_ID, settings.COPYLEAKS_API_KEY)
-        except CommandError as ce:
-            response = ce.get_response()
-            print(f"An error occurred (HTTP status code {response.status_code}):")
-            print(response.content)
-            return JsonResponse({"error":"theres a problem"}, status=401)
-        
-        return JsonResponse(response)
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+import os
+import json
 
 class ScanURLView(View):
-    def get(self, request, filename, token, issued, expires):
-        scan_id = random.randint(100, 100000)
+    def get(self, request, filename):
+        res = requests.post("https://api.unicheck.com/oauth/access-token", data={
+            "grant_type": "client_credentials",
+            "client_id": "d2a3ad3e1bf9a9e4e8ab",
+            "client_secret": "3e1965ac5a36aa75463c1b795743fc88c551ef75"
+        }, headers={"Content-Type" : "application/x-www-form-urlencoded"})
 
-        print("scan_id")
-        print(scan_id)
-        print("scan_id")
+        access_token = res.json()['access_token']
+
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Authorization": "Bearer " + access_token
+        }
+
+        filestring = f"https://bitsmss.s3.eu-west-2.amazonaws.com/{filename}"
+
+        file = requests.get(filestring)
         
-        url_submission = UrlDocument()
-        url_submission.set_url(f"https://bitsmss.s3.eu-west-2.amazonaws.com/{filename}")
-        scan_properties = ScanProperties('http://cd0b0bfc85b4.ngrok.io/app/webhook/results?event={{STATUS}}')
-        scan_properties.set_sandbox(True)
-        url_submission.set_properties(scan_properties)
-        tok = { "access_token": token,  ".issued": issued,  ".expires": expires }
+        file_path = os.path.join(settings.MEDIA_ROOT, filename)
 
-        res = Copyleaks.submit_url(Products.EDUCATION, tok, scan_id, url_submission)
-        print(res)
+        with open(file_path, 'wb') as f:
+            f.write(file.content)
 
-        return JsonResponse({"status": "success"})
+        upload_res = requests.post("https://api.unicheck.com/files", 
+            files={'file': open(file_path, 'rb')}, 
+            headers=headers
+        )
+
+        doc_id = upload_res.json()['data']['id']
+        words_count = upload_res.json()['data']['attributes']['words_count']
+        pages_count = upload_res.json()['data']['attributes']['pages_count']
+
+        headers.update({"Content-Type": "application/vnd.api+json"})
+
+        similarity_res = requests.post("https://api.unicheck.com/similarity/checks", data = json.dumps({ "data": {"type": "similarityCheck", "attributes": { "search_types": { "web": True, "library": False  }, "parameters": { "sensitivity": { "percentage": 0, "words_count": 8 } } } }, "relationships": { "file": { "data": { "id": doc_id, "type": "file" } } }}), headers = headers)
+
+        check_id = similarity_res.json()['data']['id']
+
+        return JsonResponse({
+            "message": "success", 
+            "scan_id": check_id, 
+            "access_token": access_token,
+            "pages_count": pages_count,
+            "words_count": words_count
+        })
+
+@method_decorator(csrf_exempt, name='dispatch')
+class CheckResult(View):
+    def get(self, request, scan_id, access_token):
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Authorization": "Bearer " + access_token
+        }
+        result_res = requests.get(f"https://api.unicheck.com/similarity/checks/{scan_id}", headers=headers)
+        
+        return JsonResponse(result_res.json())

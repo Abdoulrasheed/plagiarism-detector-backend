@@ -2,6 +2,6 @@ from django.urls import path
 from .import views
 
 urlpatterns = [
-    path("login/", views.LoginView.as_view(), name="login"),
-    path("scanurl/<str:filename>/<str:token>/<str:issued>/<str:expires>/", views.ScanURLView.as_view(), name="scanurl")
+    path("scan/<str:filename>/", views.ScanURLView.as_view(), name="scanurl"),
+    path("results/<str:scan_id>/<str:access_token>", views.CheckResult.as_view(), name="results")
 ]
