@@ -13,8 +13,8 @@ class ScanURLView(View):
     def get(self, request, filename):
         res = requests.post("https://api.unicheck.com/oauth/access-token", data={
             "grant_type": "client_credentials",
-            "client_id": "d2a3ad3e1bf9a9e4e8ab",
-            "client_secret": "3e1965ac5a36aa75463c1b795743fc88c551ef75"
+            "client_id": "<client_id_get_it_from_unicheck.com>",
+            "client_secret": "<client_secret_get_it_from_unicheck.com>"
         }, headers={"Content-Type" : "application/x-www-form-urlencoded"})
 
         access_token = res.json()['access_token']
